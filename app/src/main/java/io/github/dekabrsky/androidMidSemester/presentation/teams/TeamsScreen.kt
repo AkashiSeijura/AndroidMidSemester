@@ -41,6 +41,8 @@ import org.koin.androidx.compose.koinViewModel
 /**
  * Экран выбора команд. Отмеченные команды сохраняются сразу (без кнопки "Сохранить"),
  * а список матчей сам перезагрузится, когда пользователь вернётся назад.
+ * Сначала видны 10 популярных клубов, полный список раскрывается кнопкой внизу,
+ * а поиск всегда идёт по всем командам.
  */
 @Composable
 fun TeamsScreen(
@@ -81,6 +83,7 @@ fun TeamsScreen(
                     state = current,
                     onQueryChange = viewModel::onQueryChange,
                     onTeamToggle = viewModel::onTeamToggle,
+                    onToggleShowAll = viewModel::onToggleShowAll,
                 )
             }
         }
@@ -131,6 +134,7 @@ private fun TeamsContent(
     state: TeamsUiState.Content,
     onQueryChange: (String) -> Unit,
     onTeamToggle: (Long) -> Unit,
+    onToggleShowAll: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -159,6 +163,24 @@ private fun TeamsContent(
                         checked = team.id in state.selectedIds,
                         onToggle = { onTeamToggle(team.id) },
                     )
+                }
+                if (state.canToggleShowAll) {
+                    item(key = "show_all_toggle") {
+                        TextButton(
+                            onClick = onToggleShowAll,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                        ) {
+                            Text(
+                                if (state.showAll) {
+                                    "Только популярные"
+                                } else {
+                                    "Показать все команды (${state.totalCount})"
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }

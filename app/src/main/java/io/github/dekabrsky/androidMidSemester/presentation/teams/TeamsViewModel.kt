@@ -2,6 +2,7 @@ package io.github.dekabrsky.androidMidSemester.presentation.teams
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.dekabrsky.androidMidSemester.domain.model.POPULAR_TEAM_IDS
 import io.github.dekabrsky.androidMidSemester.domain.model.Team
 import io.github.dekabrsky.androidMidSemester.domain.usecase.ClearTeamSelectionUseCase
 import io.github.dekabrsky.androidMidSemester.domain.usecase.GetTeamsUseCase
@@ -19,14 +20,22 @@ sealed interface TeamsUiState {
     data object Loading : TeamsUiState
 
     /**
-     * @param teams команды, подходящие под строку поиска
-     * @param selectedIds выбранные команды (по всему списку, а не только по найденным)
+     * @param teams команды, которые сейчас видны на экране
+     * @param selectedIds выбранные команды (по всему списку, а не только по видимым)
+     * @param query строка поиска
+     * @param showAll true, если пользователь раскрыл полный список
+     * @param totalCount сколько всего команд пришло с сервера (для кнопки "Показать все")
      */
     data class Content(
         val teams: List<Team>,
         val selectedIds: Set<Long>,
         val query: String,
-    ) : TeamsUiState
+        val showAll: Boolean,
+        val totalCount: Int,
+    ) : TeamsUiState {
+        /** Кнопку "Показать все / Только популярные" прячем во время поиска: поиск и так идёт по всем. */
+        val canToggleShowAll: Boolean get() = query.isBlank()
+    }
 
     data class Error(val message: String) : TeamsUiState
 }
@@ -47,16 +56,19 @@ class TeamsViewModel(
 
     private val load = MutableStateFlow<TeamsLoad>(TeamsLoad.Loading)
     private val query = MutableStateFlow("")
+    private val showAll = MutableStateFlow(false)
 
     val state: StateFlow<TeamsUiState> =
-        combine(load, observeSelectedTeams(), query) { load, selectedIds, query ->
+        combine(load, observeSelectedTeams(), query, showAll) { load, selectedIds, query, showAll ->
             when (load) {
                 TeamsLoad.Loading -> TeamsUiState.Loading
                 is TeamsLoad.Failed -> TeamsUiState.Error(load.message)
                 is TeamsLoad.Loaded -> TeamsUiState.Content(
-                    teams = load.teams.filter { it.name.contains(query.trim(), ignoreCase = true) },
+                    teams = visibleTeams(load.teams, selectedIds, query, showAll),
                     selectedIds = selectedIds,
                     query = query,
+                    showAll = showAll,
+                    totalCount = load.teams.size,
                 )
             }
         }.stateIn(
@@ -81,6 +93,10 @@ class TeamsViewModel(
         clearTeamSelection()
     }
 
+    fun onToggleShowAll() {
+        showAll.value = !showAll.value
+    }
+
     fun retry() {
         loadTeams()
     }
@@ -96,5 +112,28 @@ class TeamsViewModel(
                 TeamsLoad.Failed(e.message ?: "Не удалось загрузить команды")
             }
         }
+    }
+
+    /**
+     * Что показать на экране:
+     * - есть строка поиска: ищем по всем командам;
+     * - раскрыт полный список: все команды в порядке сервера;
+     * - иначе 10 популярных в порядке [POPULAR_TEAM_IDS], а за ними уже выбранные
+     *   непопулярные команды, чтобы их можно было увидеть и снять галочку.
+     */
+    private fun visibleTeams(
+        all: List<Team>,
+        selectedIds: Set<Long>,
+        query: String,
+        showAll: Boolean,
+    ): List<Team> {
+        val trimmed = query.trim()
+        if (trimmed.isNotEmpty()) return all.filter { it.name.contains(trimmed, ignoreCase = true) }
+        if (showAll) return all
+
+        val byId = all.associateBy { it.id }
+        val popular = POPULAR_TEAM_IDS.mapNotNull { byId[it] }
+        val selectedOthers = all.filter { it.id in selectedIds && it.id !in POPULAR_TEAM_IDS }
+        return popular + selectedOthers
     }
 }
